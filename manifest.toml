@@ -1,0 +1,9 @@
+manifest_version = 1
+
+[module]
+name = "Owner Utils"
+id = "owner_utils"
+description = "A set of utilities for bot owners"
+version = "1.0.0"
+license = "GNU GPLv3"
+authors = ["Fripe"]
