@@ -1,3 +1,4 @@
+import discord.abc
 from discord.ext import commands
 
 import breadcord
@@ -11,9 +12,10 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
     @commands.command()
     @commands.is_owner()
-    async def sync(self, ctx: commands.Context):
-        self.bot.tree.copy_global_to(guild=ctx.guild)
-        await self.bot.tree.sync(guild=ctx.guild)
+    async def sync(self, ctx: commands.Context, guild: discord.abc.Snowflake = None):
+        if guild is not None:
+            self.bot.tree.copy_global_to(guild=guild)
+        await self.bot.tree.sync(guild=guild)
         await ctx.reply("Commands synchronised!")
 
     @commands.command()
