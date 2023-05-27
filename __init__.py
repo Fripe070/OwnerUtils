@@ -1,3 +1,6 @@
+import asyncio
+import io
+import re
 from typing import Literal
 
 import discord.abc
@@ -6,7 +9,48 @@ from discord.ext import commands
 import breadcord
 
 
+class ShellInputModal(discord.ui.Modal, title="Shell input"):
+    shell_input = discord.ui.TextInput(
+        label="Input", placeholder="Input to send to the running shell", style=discord.TextStyle.long
+    )
+
+    def __init__(self, process: asyncio.subprocess.Process):
+        super().__init__()
+        self.process = process
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.process.stdin.write(self.shell_input.value.encode("utf-8"))
+        await interaction.response.defer()
+
+
+class ShellView(discord.ui.View):
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
+        super().__init__(timeout=None)
+        self.process = process
+
+    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.red)
+    async def cancel(self, *_) -> None:
+        self.process.terminate()
+        self.stop()
+
+    @discord.ui.button(label='Send input', style=discord.ButtonStyle.gray)
+    async def send_input(self, interaction: discord.Interaction, _) -> None:
+        input_modal = ShellInputModal(self.process)
+        await interaction.response.send_modal(input_modal)
+
+
 class OwnerUtils(breadcord.module.ModuleCog):
+    def __init__(self, module_id) -> None:
+        super().__init__(module_id)
+
+        if not self.settings.rce_commands_enabled.value:
+            self.shell.enabled = False
+
+    async def cog_command_error(self, ctx: commands.Context, error: Exception):
+        if isinstance(error, commands.DisabledCommand):
+            raise commands.CommandNotFound(f'Command "{ctx.invoked_with}" is not found')
+        raise error
+
     @commands.command()
     @commands.is_owner()
     async def stop(self, ctx: commands.Context) -> None:
@@ -25,7 +69,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         self,
         ctx: commands.Context,
         guilds: commands.Greedy[discord.Object] = commands.parameter(description="The guilds to sync in"),
-        mode: Literal["~", "*", "^", "^*"] | None = commands.parameter(default=None, description="The guilds to sync in"),
+        mode: Literal["~", "*", "^", "^*"] | None = commands.parameter(default=None, description="Guilds to sync in"),
     ) -> None:
         """
         Syncs the app command tree.
@@ -72,6 +116,56 @@ class OwnerUtils(breadcord.module.ModuleCog):
             await ctx.bot.tree.sync()
             await response.edit(content="Synced app commands globally.")
 
+    @commands.command()
+    @commands.is_owner()
+    async def shell(self, ctx: commands.Context, *, command: str) -> None:
+        """Runs an arbitrary shell command."""
+
+        response = await ctx.reply("Running...")
+        process = await asyncio.create_subprocess_shell(
+            command,
+            shell=True,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        shell_view = ShellView(process)
+
+        def clean_output(output: str) -> str:
+            output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
+            output = re.sub(r'^\s*\n|\n\s*$', '', output)  # Removes empty lines at the beginning and end of the output
+
+            # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
+            # It should remove escape codes (I hope)
+            output = re.sub(r'[\x07\x1b\[].*?[a-zA-Z]', '', output)
+            return output
+
+        async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
+            new_out = clean_output(new_out)
+
+            # There's a newline before the output so that it doesn't accidentally add syntax highlighting
+            if len(codeblock := f"```\n{new_out}```") <= 2000:
+                await response.edit(content=codeblock + extra_text, **edit_kwargs)
+            else:
+                await response.edit(
+                    content=f"Output too long, uploading as file.{extra_text}",
+                    attachments=[discord.File(io.BytesIO(new_out.encode("utf-8")), filename="output.txt")],
+                    **edit_kwargs
+                )
+
+        await asyncio.sleep(update_interval := self.settings.shell_update_interval_seconds.value)
+        out = ""
+        while process.returncode is None:
+            out += (await process.stdout.read(1024)).decode("utf-8")
+            if out.strip():
+                await update_output(out, view=shell_view)
+            await asyncio.sleep(update_interval)
+        else:
+            out += (await process.communicate())[0].decode("utf-8")
+            await update_output(out)
+
+        response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
+        await response.edit(content=f"{response.content}\nProcess exited with code {process.returncode}", view=None)
 
 
 async def setup(bot: breadcord.Bot):
