@@ -24,17 +24,30 @@ class ShellInputModal(discord.ui.Modal, title="Shell input"):
 
 
 class ShellView(discord.ui.View):
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, *, user_id: int) -> None:
         super().__init__(timeout=None)
         self.process = process
+        self.user_id = user_id
 
     @discord.ui.button(label='Cancel', style=discord.ButtonStyle.red)
-    async def cancel(self, *_) -> None:
+    async def cancel(self, interaction: discord.Interaction, *_) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                f'Only <@{self.user_id}> can perform this action!',
+                ephemeral=True
+            )
+            return
         self.process.terminate()
         self.stop()
 
     @discord.ui.button(label='Send input', style=discord.ButtonStyle.gray)
     async def send_input(self, interaction: discord.Interaction, _) -> None:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                f'Only <@{self.user_id}> can perform this action!',
+                ephemeral=True
+            )
+            return
         input_modal = ShellInputModal(self.process)
         await interaction.response.send_modal(input_modal)
 
@@ -129,7 +142,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        shell_view = ShellView(process)
+        shell_view = ShellView(process, user_id=ctx.author.id)
 
         def clean_output(output: str) -> str:
             output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
