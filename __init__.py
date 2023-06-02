@@ -69,7 +69,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
     async def stop(self, ctx: commands.Context) -> None:
         """Stops the bot and the running python process."""
         self.logger.info("Stopping bot")
-        await ctx.reply("Stopping bot", ephemeral=True)
+        await ctx.reply("Stopping bot")
         await self.bot.close()
         exit()
 
