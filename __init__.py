@@ -146,11 +146,12 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
         def clean_output(output: str) -> str:
             output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
-            output = re.sub(r'^\s*\n|\n\s*$', '', output)  # Removes empty lines at the beginning and end of the output
 
             # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
             # It should remove escape codes (I hope)
-            output = re.sub(r'[\x07\x1b\[].*?[a-zA-Z]', '', output)
+            output = re.sub(r"[\x07\x1b\[].*?[a-zA-Z]", "", output)
+
+            output = re.sub(r"^\s*\n|\n\s*$", "", output)  # Removes empty lines at the beginning and end of the output
             return output
 
         async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
@@ -173,9 +174,8 @@ class OwnerUtils(breadcord.module.ModuleCog):
             if out.strip():
                 await update_output(out, view=shell_view)
             await asyncio.sleep(update_interval)
-        else:
-            out += (await process.communicate())[0].decode("utf-8")
-            await update_output(out)
+        out += (await process.communicate())[0].decode("utf-8")
+        await update_output(out)
 
         response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
         await response.edit(content=f"{response.content}\nProcess exited with code {process.returncode}", view=None)
