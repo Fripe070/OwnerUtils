@@ -1,12 +1,25 @@
 import asyncio
+import inspect
 import io
 import re
-from typing import Literal
+from contextlib import redirect_stdout, redirect_stderr
+from typing import Literal, Any
 
 import discord.abc
 from discord.ext import commands
 
 import breadcord
+
+
+def clean_output(output: str, /) -> str:
+    output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
+
+    # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
+    # It should remove escape codes (I hope)
+    output = re.sub(r"[\x07\x1b\[].*?[a-zA-Z]", "", output)
+
+    output = re.sub(r"^\s*\n|\n\s*$", "", output)  # Removes empty lines at the beginning and end of the output
+    return output
 
 
 class ShellInputModal(discord.ui.Modal, title="Shell input"):
@@ -58,6 +71,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
         if not self.settings.rce_commands_enabled.value:
             self.shell.enabled = False
+            self.evaluate.enabled = False
 
     async def cog_command_error(self, ctx: commands.Context, error: Exception):
         if isinstance(error, commands.DisabledCommand):
@@ -144,21 +158,11 @@ class OwnerUtils(breadcord.module.ModuleCog):
         )
         shell_view = ShellView(process, user_id=ctx.author.id)
 
-        def clean_output(output: str) -> str:
-            output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
-
-            # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
-            # It should remove escape codes (I hope)
-            output = re.sub(r"[\x07\x1b\[].*?[a-zA-Z]", "", output)
-
-            output = re.sub(r"^\s*\n|\n\s*$", "", output)  # Removes empty lines at the beginning and end of the output
-            return output
-
         async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
             new_out = clean_output(new_out)
 
             # There's a newline before the output so that it doesn't accidentally add syntax highlighting
-            if len(codeblock := f"```\n{new_out}```") <= 2000:
+            if len(codeblock := f"```\n{new_out}\n```") <= 2000:
                 await response.edit(content=codeblock + extra_text, **edit_kwargs)
             else:
                 await response.edit(
@@ -179,6 +183,52 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
         response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
         await response.edit(content=f"{response.content}\nProcess exited with code {process.returncode}", view=None)
+
+    @commands.command(aliases=["eval"])
+    @commands.is_owner()
+    async def evaluate(self, ctx: commands.Context, *, code: str) -> None:
+        """Evaluates python code."""
+        response = await ctx.reply("Evaluating...")
+
+        exception = None
+        with redirect_stdout(io.StringIO()) as stdout:
+            with redirect_stderr(io.StringIO()) as stderr:
+                try:
+                    if inspect.isawaitable(return_value := eval(code)):
+                        return_value = await return_value
+                except Exception as error:
+                    exception = error
+        stdout = stdout.getvalue()
+        stderr = stderr.getvalue()
+
+        def output_segment(*, value: Any, title: str) -> str:
+            return inspect.cleandoc(f"""
+                **{discord.utils.escape_markdown(title)}**
+                ```
+                {clean_output(str(value))}
+                ```
+            """)
+
+        if len(output := output_segment(value=return_value, title="Return value")
+            + (output_segment(value=exception, title="Exception") if exception is not None else "")
+            + (output_segment(value=stdout, title="Output stream") if stdout else "")
+            + (output_segment(value=stderr, title="Error stream") if stderr else "")
+        ) <= 2000:
+            await response.edit(content=output)
+        else:
+            await response.edit(
+                content="Output too big, uploading as file(s).",
+                attachments=[
+                    discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
+                    for content, filename in (
+                        (return_value,      "return.txt"),
+                        (exception,         "exception.txt"),
+                        (stdout or None,    "stdout.txt"),
+                        (stderr or None,    "stderr.txt")
+                    )
+                    if content is not None
+                ]
+            )
 
 
 async def setup(bot: breadcord.Bot):
