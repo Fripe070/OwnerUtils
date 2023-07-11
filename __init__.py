@@ -87,61 +87,87 @@ class OwnerUtils(breadcord.module.ModuleCog):
         await self.bot.close()
         exit()
 
-    # Based on the sync command by AbstractUmbra
-    # https://gist.github.com/AbstractUmbra/a9c188797ae194e592efe05fa129c57f#sync-command-example
+    # The docstring is only meant to be used by the help command
+    # noinspection PyIncorrectDocstring
     @commands.command()
     @commands.guild_only()
     @commands.is_owner()
     async def sync(
         self,
         ctx: commands.Context,
-        guilds: commands.Greedy[discord.Object] = commands.parameter(description="The guilds to sync in"),
-        mode: Literal["~", "*", "^", "^*"] | None = commands.parameter(default=None, description="Guilds to sync in"),
+        guilds: commands.Greedy[discord.Guild],
+        scope: str | None = None,
+        mode: str | None = None
     ) -> None:
+        """Syncs application commands
+
+        Parameters
+        -----------
+        guilds:
+            The IDs of guilds to sync to.
+        scope:
+            Alternative to specifying guild IDs.
+            `all` or `global` syncs in all guilds
+            `local` or `here` syncs in the current guild
+        mode:
+            Alternative sync modes.
+            `clear` clears the commands and then syncs.
+            `copy` copies the global commands into the guild as guild specific commands.
         """
-        Syncs the app command tree.
 
-        Sync options:
-        `~`: Syncs the current guild
-        `*`: Copies global commands to the current guild
-        `^`: Clears guild specific commands in the current guild, or the specified guilds
-        Nothing: Syncs globally
-        """
+        guilds: list[discord.Guild] | Literal["all"] = guilds
+        scope = scope.lower() if scope else None
+        mode: Literal["clear", "copy"] | None = mode.lower() if mode else None
 
-        if mode is None and guilds:
-            response = await ctx.reply("Syncing app commands in the specified guild(s)...")
+        if guilds:
+            if mode:
+                raise commands.TooManyArguments(f"Too many arguments passed to {ctx.command.qualified_name}")
+            mode = scope
+        elif scope in ["all", "global", "globally"]:
+            guilds = "all"
+        elif scope in ["local", "locally", "here"]:
+            guilds = [ctx.guild]
+
+        if mode is None:
+            if guilds == "all":
+                response = await ctx.reply("Syncing commands in all guilds..")
+                await ctx.bot.tree.sync()
+                await response.edit(content="Synced commands in all guilds")
+            else:
+                response = await ctx.reply(f"Syncing commands in {len(guilds)} guild(s)..")
+                for guild in guilds:
+                    await ctx.bot.tree.sync(guild=guild)
+                await response.edit(content=f"Synced commands in {len(guilds)} guild(s)")
+            return
+        elif mode == "clear":
+            if guilds == "all":
+                response = await ctx.reply("Clearing commands in all guilds..")
+                ctx.bot.tree.clear_commands()
+                await ctx.bot.tree.sync()
+                await response.edit(content="Cleared commands in all guilds")
+            else:
+                response = await ctx.reply(f"Clearing commands in {len(guilds)} guild(s)..")
+                for guild in guilds:
+                    ctx.bot.tree.clear_commands(guild=guild)
+                    await ctx.bot.tree.sync(guild=guild)
+                await response.edit(content=f"Cleared commands in {len(guilds)} guild(s)")
+            return
+        elif mode == "copy" and guilds != "all":
+            response = await ctx.reply(f"Copying global commands to {len(guilds)} guild(s)..")
             for guild in guilds:
+                ctx.bot.tree.copy_global_to(guild=guild)
                 await ctx.bot.tree.sync(guild=guild)
-            await response.edit(content=f"Synced app commands in {len(guilds)} guilds.")
+            await response.edit(content=f"Copied global commands to {len(guilds)} guild(s)")
+            return
 
-        elif mode == "~":
-            response = await ctx.reply("Syncing app commands in the current guild...")
-            await ctx.bot.tree.sync(guild=ctx.guild)
-            await response.edit(content="Synced app commands in the current guild.")
+        raise commands.BadArgument()
 
-        elif mode == "*":
-            response = await ctx.reply("Copying global app commands to the current guild...")
-            ctx.bot.tree.copy_global_to(guild=ctx.guild)
-            await ctx.bot.tree.sync(guild=ctx.guild)
-            await response.edit(content="Copied and synced global app commands to the current guild.")
-
-        elif mode == "^" and guilds:
-            response = await ctx.reply("Clearing guild specific app commands in the specified guilds...")
-            for guild in guilds:
-                ctx.bot.tree.clear_commands(guild=guild)
-                await ctx.bot.tree.sync(guild=guild)
-            await response.edit(content="Cleared guild specific app commands in the specified guilds.")
-
-        elif mode == "^":
-            response = await ctx.reply("Clearing guild specific app commands in the current guild...")
-            ctx.bot.tree.clear_commands(guild=ctx.guild)
-            await ctx.bot.tree.sync(guild=ctx.guild)
-            await response.edit(content="Cleared guild specific app commands in the current guild.")
-
-        else:
-            response = await ctx.reply("Syncing app commands globally...")
-            await ctx.bot.tree.sync()
-            await response.edit(content="Synced app commands globally.")
+    @sync.error
+    async def sync_error(self, ctx: commands.Context, error: Exception) -> None:
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply("Invalid arguments were passed")
+            return
+        raise error
 
     @commands.command()
     @commands.is_owner()
