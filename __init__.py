@@ -129,15 +129,15 @@ class OwnerUtils(breadcord.module.ModuleCog):
             guilds = [ctx.guild]
 
         if mode is None:
-            if guilds == "all":
-                response = await ctx.reply("Syncing commands in all guilds..")
-                await ctx.bot.tree.sync()
-                await response.edit(content="Synced commands in all guilds")
-            else:
+            if guilds:
                 response = await ctx.reply(f"Syncing commands in {len(guilds)} guild(s)..")
                 for guild in guilds:
                     await ctx.bot.tree.sync(guild=guild)
                 await response.edit(content=f"Synced commands in {len(guilds)} guild(s)")
+            else:
+                response = await ctx.reply("Syncing commands in all guilds..")
+                await ctx.bot.tree.sync()
+                await response.edit(content="Synced commands in all guilds")
             return
         elif mode == "clear":
             if guilds == "all":
