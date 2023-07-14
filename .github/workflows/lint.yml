@@ -1,22 +1,55 @@
-name: 'Link Checker: All English'
+name: Breadcord Setup
 
 on:
   workflow_dispatch:
   push:
-  pull_request:
 
 jobs:
-  lint:
+  breadcord:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Checkout Breadcord
         uses: actions/checkout@v3
         with:
-          # Repository name with owner. For example, actions/checkout
           repository: Breadcord/Breadcord
-      
+
+      - name: Checkout Current Module Repo
+        uses: actions/checkout@v3
+        with:
+          path: data/modules/CI_module
+
+      - name: Install Breadcord Dependencies
+        run: pip install -U -r requirements.txt
+
+      - name: Run Breadcord to create settings file
+        run: python -m breadcord --no-ui
+
+      - name: Set token
+        run: |
+          python -c "
+          import tomlkit
+          
+          with open('data/settings.toml', 'r', encoding='utf-8') as f:
+            settings_toml = tomlkit.parse(f.read())
+          
+          with open('data/modules/CI_module/manifest.toml', 'r', encoding='utf-8') as f:
+            manifest_toml = tomlkit.parse(f.read())
+
+          settings_toml['token'] = '${{ secrets.DISCORD_TOKEN }}'
+          settings_toml['modules'] = [manifest_toml['module']['id']]
+          
+          with open('data/settings.toml', 'w', encoding='utf-8') as f:
+            f.write(tomlkit.dumps(settings_toml))
+          "
+
       - name: debug
-        run: tree -d .
+        run: cat data/settings.toml
 
-
-
+      - name: Run Breadcord
+        run: timeout --preserve-status 30 python -m breadcord --no-ui
+        
