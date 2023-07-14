@@ -3,6 +3,7 @@ name: Breadcord Setup
 on:
   workflow_dispatch:
   push:
+  pull_request:
 
 jobs:
   breadcord:
@@ -46,10 +47,6 @@ jobs:
           with open('data/settings.toml', 'w', encoding='utf-8') as f:
             f.write(tomlkit.dumps(settings_toml))
           "
-
-      - name: debug
-        run: cat data/settings.toml
-
+          
       - name: Run Breadcord
         run: timeout --preserve-status 30 python -m breadcord --no-ui
-        
